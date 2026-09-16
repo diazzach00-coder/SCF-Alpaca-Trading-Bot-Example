@@ -1,0 +1,14 @@
+# keys: never
+secrets.env
+*.env
+!secrets.env.example
+
+# data and run output
+data/
+logs/
+results/
+
+# python
+__pycache__/
+*.pyc
+.pytest_cache/
