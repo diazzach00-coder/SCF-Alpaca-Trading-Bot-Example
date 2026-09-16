@@ -204,7 +204,68 @@ def main() -> None:
     f = RESULTS / ("ladder.json" if a.ladder else "backtest.json")
     f.write_text(json.dumps(out, indent=2, default=str))
     print(f"\n-> {f}")
+    if not a.ladder:
+        pnl_report(a, common, variants[0])
     print("Reminder: every variant you try counts. Re-run with --trials <total tried> and watch the deflated PSR.")
+
+
+# ------------------------------------------------------------------------ P&L view
+START_EQUITY = 100_000.0
+
+
+def pnl_report(a, common: dict, variant: dict) -> None:
+    """Dollar P&L on $100k: equity curves per ETF and for the book the bot runs (equal weight of
+    bot.SYMBOLS, i.e. 50% QQQ + 50% SPY), total and by year. Writes CSV, JSON and a chart."""
+    try:
+        from bot import SYMBOLS as BOT_SYMBOLS
+    except Exception:
+        BOT_SYMBOLS = ["QQQ", "SPY"]
+    curves, rets = {}, {}
+    for sym in a.symbols:
+        days = load_days(sym)
+        r, _ = run_strategy(days, **variant, **common)
+        rets[sym] = pd.Series(r, index=pd.to_datetime([d for d, *_ in days]))
+    book = [s for s in BOT_SYMBOLS if s in rets]
+    if len(book) >= 2:
+        rets["BOOK (" + "+".join(book) + ", equal weight)"] = pd.concat([rets[s] for s in book], axis=1).fillna(0.0).mean(axis=1)
+    eq = pd.DataFrame({k: START_EQUITY * (1 + v).cumprod() for k, v in rets.items()}).ffill()   # union of the calendars
+    pnl_by_year = {}
+    for k, v in rets.items():
+        s = START_EQUITY * (1 + v).cumprod()          # each series on its own calendar: no gaps to mis-fill
+        daily_pnl = s.diff()
+        daily_pnl.iloc[0] = s.iloc[0] - START_EQUITY
+        pnl_by_year[k] = daily_pnl.groupby(s.index.year).sum()
+    summary = {"start_equity": START_EQUITY, "lev_cap": a.lev_cap, "cost_bp": a.cost_bp, "variant": variant,
+               "total_pnl": {k: float(eq[k].iloc[-1] - START_EQUITY) for k in eq},
+               "final_equity": {k: float(eq[k].iloc[-1]) for k in eq},
+               "max_drawdown": {k: float((eq[k] / eq[k].cummax() - 1).min()) for k in eq},
+               "pnl_by_year": {k: {str(y): float(v) for y, v in s.items()} for k, s in pnl_by_year.items()}}
+    tag = f"lev{a.lev_cap:g}x"
+    eq.to_csv(RESULTS / f"equity_{tag}.csv", index_label="date")
+    (RESULTS / f"pnl_{tag}.json").write_text(json.dumps(summary, indent=2))
+    years = sorted({y for s in pnl_by_year.values() for y in s.index})
+    print(f"\nP&L on ${START_EQUITY:,.0f} starting equity, {tag}, {a.cost_bp} bp per round trip")
+    print(f"  {'':34}" + "".join(f"{y:>9}" for y in years) + f"{'total':>11}{'maxDD':>8}")
+    for k in eq:
+        row = "".join(f"{pnl_by_year[k].get(y, 0.0):>9,.0f}" for y in years)
+        print(f"  {k:34}{row}{summary['total_pnl'][k]:>11,.0f}{summary['max_drawdown'][k]:>8.1%}")
+    try:
+        import matplotlib
+        matplotlib.use("Agg")
+        import matplotlib.pyplot as plt
+        fig, ax = plt.subplots(figsize=(11, 5))
+        for k in eq:
+            ax.plot(eq.index, eq[k], label=f"{k}  ({summary['total_pnl'][k]:+,.0f})", linewidth=2.2 if k.startswith("BOOK") else 1.3)
+        ax.axhline(START_EQUITY, color="grey", linewidth=0.8)
+        ax.set_title(f"Noise-area intraday momentum: equity on ${START_EQUITY:,.0f}, {tag}, {a.cost_bp} bp/round trip, flat every night")
+        ax.set_ylabel("equity ($)")
+        ax.legend(loc="upper left", frameon=False)
+        ax.grid(alpha=0.3)
+        fig.tight_layout()
+        fig.savefig(RESULTS / f"pnl_{tag}.png", dpi=150)
+        print(f"-> {RESULTS / f'pnl_{tag}.png'}, {RESULTS / f'equity_{tag}.csv'}")
+    except Exception as e:                                      # matplotlib is optional
+        print(f"(no chart: {e})")
 
 
 if __name__ == "__main__":

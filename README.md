@@ -34,6 +34,12 @@ What you should see (2016-01 → 2026-09, unlevered, 1 bp): QQQ Sharpe about 1.1
 t-stat near 4 in both halves of the decade; SPY about 0.6; IWM negative. The ladder shows every
 faster clock losing edge: QQQ 1.22 at 30 minutes, 0.91 at 15, 0.58 at 5.
 
+Every non-ladder run also prints the **P&L in dollars** on $100,000, by year, for each ETF and
+for the book the bot runs (50% QQQ + 50% SPY), and writes `results/pnl_lev1x.png` (the equity
+curve), `results/equity_lev1x.csv` and `results/pnl_lev1x.json`. At 1× the book turns $100,000
+into about $184,000 over the decade with a 7% worst drawdown and three losing years; at
+`--lev-cap 4` it is about $299,000 with a 17% drawdown. Leverage scales both.
+
 The backtest is honest by construction: the band for day *t* uses only days *t−14…t−1*, the
 signal is the last bar before the decision and the fill is the next bar's open, costs are charged on
 every round trip, and the Sharpe is deflated for the number of variants you ran. Run `--ladder`
